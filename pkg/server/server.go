@@ -6,16 +6,19 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/gorgemul/todos/pkg/db"
 	"github.com/gorgemul/todos/types"
+	"github.com/jackc/pgx/v5"
 )
 
 type Server struct {
+	db *pgx.Conn
 	http.Handler
 }
 
-func New() *Server {
+func New(db *pgx.Conn) *Server {
 	srv := new(Server)
+
+	srv.db = db
 	mux := http.NewServeMux()
 
 	mux.Handle("GET /", http.HandlerFunc(srv.getHandler))
@@ -28,15 +31,7 @@ func New() *Server {
 }
 
 func (s *Server) getHandler(w http.ResponseWriter, r *http.Request) {
-	db, err := db.NewDB()
-	if err != nil {
-		assertInternalErr(w, err)
-		return
-	}
-
-	defer db.Close(context.Background())
-
-	rows, err := db.Query(context.Background(), "SELECT * FROM todozz")
+	rows, err := s.db.Query(context.Background(), "SELECT * FROM todozz")
 
 	if err != nil {
 		assertInternalErr(w, err)
@@ -67,6 +62,7 @@ func (s *Server) getHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = w.Write(result)
+
 	if err != nil {
 		assertInternalErr(w, err)
 		return
