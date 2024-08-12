@@ -3,160 +3,109 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 
 	"github.com/gorgemul/todos/types"
 	"github.com/jackc/pgx/v5"
 )
 
+const InvalidContentErrMsg = "Invalid content!"
+
+type TodoStore interface {
+	GetTodos() (types.Todos, error)
+	PostTodo(content string) error
+	UpdateTodo(id int, content string) error
+	DeleteTodo(id int) error
+}
+
 type Server struct {
-	db *pgx.Conn
+	store TodoStore
 	http.Handler
 }
 
-func New(db *pgx.Conn) *Server {
+func New(store TodoStore) *Server {
 	srv := new(Server)
 
-	srv.db = db
+	srv.store = store
 	mux := http.NewServeMux()
 
 	mux.Handle("GET /", http.HandlerFunc(srv.getHandler))
 	mux.Handle("POST /", http.HandlerFunc(srv.postHandler))
-	mux.Handle("PUT /update", http.HandlerFunc(srv.putHandler))
-	mux.Handle("DELETE /delete/{id}", http.HandlerFunc(srv.deleteHandler))
+	// mux.Handle("PUT /update", http.HandlerFunc(srv.putHandler))
+	// mux.Handle("DELETE /delete/{id}", http.HandlerFunc(srv.deleteHandler))
 
 	srv.Handler = mux
 	return srv
 }
 
 func (s *Server) getHandler(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query(context.Background(), "SELECT * FROM todozz")
-
+	todos, err := s.store.GetTodos()
 	if err != nil {
-		s.assertInternalErr(w, err)
+		s.logAndResponseWithStatus(w, err, http.StatusInternalServerError)
 		return
 	}
 
-	var todos []types.Todo
-
-	for rows.Next() {
-		var todo types.Todo
-		if err := rows.Scan(&todo.Id, &todo.Content, &todo.CreatedAt); err != nil {
-			s.assertInternalErr(w, err)
-			return
-		}
-		todos = append(todos, todo)
-	}
-
-	if err = rows.Err(); err != nil {
-		s.assertInternalErr(w, err)
-		return
-	}
-
-	result, err := json.MarshalIndent(todos, "", "    ")
-
+	err = s.responseInJSON(w, todos)
 	if err != nil {
-		s.assertInternalErr(w, err)
+		s.logAndResponseWithStatus(w, err, http.StatusInternalServerError)
 		return
 	}
-
-	fmt.Fprint(w, string(result))
 }
 
 func (s *Server) postHandler(w http.ResponseWriter, r *http.Request) {
-	var newTodo types.NewTodo
+	content, err := s.extractContentFromRequest(r)
+	if err != nil {
+		s.logAndResponseWithStatus(w, err, http.StatusInternalServerError)
+		return
+	}
 
+	err = s.store.PostTodo(content)
+	if err != nil {
+		s.logAndResponseWithStatus(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	s.dbExecuteSuccess(w, "add new todo")
+}
+
+func (s *Server) logAndResponseWithStatus(w http.ResponseWriter, err error, code int) {
+	errMsg := err.Error()
+	log.Println(errMsg)
+	http.Error(w, errMsg, code)
+}
+
+func (s *Server) extractContentFromRequest(r *http.Request) (string, error) {
+	var newTodo types.NewTodo
 	err := json.NewDecoder(r.Body).Decode(&newTodo)
 	if err != nil {
-		s.assertBadRequest(w, err)
-		return
+		return "", err
 	}
 
-	content := newTodo.Content
-
-	if len(content) == 0 {
-		http.Error(w, "content can't not be parsed!", http.StatusBadRequest)
-		return
+	if len(newTodo.Content) == 0 {
+		return "", errors.New(InvalidContentErrMsg)
 	}
-
-	_, err = s.db.Exec(context.Background(), "INSERT INTO todozz (content) VALUES ($1);", content)
-	if err != nil {
-		s.assertInternalErr(w, err)
-		return
-	}
-
-	fmt.Fprintf(w, "Successfully add %q", content)
+	return newTodo.Content, nil
 }
 
-func (s *Server) putHandler(w http.ResponseWriter, r *http.Request) {
-	var updateTodo types.UpdateTodo
-
-	err := json.NewDecoder(r.Body).Decode(&updateTodo)
+func (s *Server) responseInJSON(w http.ResponseWriter, v any) error {
+	byte, err := json.MarshalIndent(v, "", "    ")
 	if err != nil {
-		s.assertBadRequest(w, err)
-		return
+		return fmt.Errorf("problem marshal indent format JSON, %v", err)
 	}
 
-	updateId := updateTodo.Id
-	updateContent := updateTodo.Content
-
-	if updateId <= 0 {
-		http.Error(w, "invlid id!", http.StatusBadRequest)
-		return
-	}
-
-	if !s.todoExist(s.db, updateId) {
-		http.Error(w, "update todo is not exist!", http.StatusBadRequest)
-		return
-	}
-
-	if len(updateContent) == 0 {
-		http.Error(w, "update content is empty!", http.StatusBadRequest)
-		return
-	}
-
-	_, err = s.db.Exec(context.Background(), "UPDATE todozz SET content = $1 WHERE id = $2", updateContent, updateId)
+	_, err = w.Write(byte)
 	if err != nil {
-		s.assertInternalErr(w, err)
-		return
+		return fmt.Errorf("problem writing json response, %v", err)
 	}
 
-	fmt.Fprint(w, "Update successfully")
+	return nil
 }
 
-func (s *Server) deleteHandler(w http.ResponseWriter, r *http.Request) {
-	deleteId, _ := strconv.Atoi(r.PathValue("id"))
-
-	if deleteId <= 0 {
-		http.Error(w, "invalid id!", http.StatusBadRequest)
-		return
-	}
-
-	if !s.todoExist(s.db, deleteId) {
-		http.Error(w, "todo is not exist!", http.StatusBadRequest)
-		return
-	}
-
-	_, err := s.db.Exec(context.Background(), "DELETE FROM todozz WHERE id = $1", deleteId)
-	if err != nil {
-		s.assertInternalErr(w, err)
-		return
-	}
-
-	fmt.Fprint(w, "Delete successfully")
-}
-
-func (s *Server) assertInternalErr(w http.ResponseWriter, err error) {
-	http.Error(w, err.Error(), http.StatusInternalServerError)
-	log.Println(err)
-}
-
-func (s *Server) assertBadRequest(w http.ResponseWriter, err error) {
-	http.Error(w, err.Error(), http.StatusBadRequest)
-	log.Println(err)
+func (s *Server) dbExecuteSuccess(w http.ResponseWriter, msg string) {
+	fmt.Fprintf(w, "Successfully %s!!!\n", msg)
 }
 
 func (s *Server) todoExist(db *pgx.Conn, id int) bool {

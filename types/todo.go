@@ -2,6 +2,8 @@ package types
 
 import "time"
 
+type Todos []Todo
+
 type Todo struct {
 	Id        int       `json:"id"`
 	Content   string    `json:"content"`
