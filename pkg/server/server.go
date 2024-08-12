@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/gorgemul/todos/types"
 	"github.com/jackc/pgx/v5"
@@ -25,7 +26,7 @@ func New(db *pgx.Conn) *Server {
 	mux.Handle("GET /", http.HandlerFunc(srv.getHandler))
 	mux.Handle("POST /", http.HandlerFunc(srv.postHandler))
 	mux.Handle("PUT /update", http.HandlerFunc(srv.putHandler))
-	mux.Handle("DELETE /delete", http.HandlerFunc(srv.deleteHandler))
+	mux.Handle("DELETE /delete/{id}", http.HandlerFunc(srv.deleteHandler))
 
 	srv.Handler = mux
 	return srv
@@ -35,7 +36,7 @@ func (s *Server) getHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.Query(context.Background(), "SELECT * FROM todozz")
 
 	if err != nil {
-		assertInternalErr(w, err)
+		s.assertInternalErr(w, err)
 		return
 	}
 
@@ -44,30 +45,25 @@ func (s *Server) getHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var todo types.Todo
 		if err := rows.Scan(&todo.Id, &todo.Content, &todo.CreatedAt); err != nil {
-			assertInternalErr(w, err)
+			s.assertInternalErr(w, err)
 			return
 		}
 		todos = append(todos, todo)
 	}
 
 	if err = rows.Err(); err != nil {
-		assertInternalErr(w, err)
+		s.assertInternalErr(w, err)
 		return
 	}
 
 	result, err := json.MarshalIndent(todos, "", "    ")
 
 	if err != nil {
-		assertInternalErr(w, err)
+		s.assertInternalErr(w, err)
 		return
 	}
 
-	_, err = w.Write(result)
-
-	if err != nil {
-		assertInternalErr(w, err)
-		return
-	}
+	fmt.Fprint(w, string(result))
 }
 
 func (s *Server) postHandler(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +71,7 @@ func (s *Server) postHandler(w http.ResponseWriter, r *http.Request) {
 
 	err := json.NewDecoder(r.Body).Decode(&newTodo)
 	if err != nil {
-		assertBadRequest(w, err)
+		s.assertBadRequest(w, err)
 		return
 	}
 
@@ -88,7 +84,7 @@ func (s *Server) postHandler(w http.ResponseWriter, r *http.Request) {
 
 	_, err = s.db.Exec(context.Background(), "INSERT INTO todozz (content) VALUES ($1);", content)
 	if err != nil {
-		assertInternalErr(w, err)
+		s.assertInternalErr(w, err)
 		return
 	}
 
@@ -100,7 +96,7 @@ func (s *Server) putHandler(w http.ResponseWriter, r *http.Request) {
 
 	err := json.NewDecoder(r.Body).Decode(&updateTodo)
 	if err != nil {
-		assertBadRequest(w, err)
+		s.assertBadRequest(w, err)
 		return
 	}
 
@@ -108,11 +104,11 @@ func (s *Server) putHandler(w http.ResponseWriter, r *http.Request) {
 	updateContent := updateTodo.Content
 
 	if updateId <= 0 {
-		http.Error(w, "invlid id", http.StatusBadRequest)
+		http.Error(w, "invlid id!", http.StatusBadRequest)
 		return
 	}
 
-	if !todoExist(s.db, updateId) {
+	if !s.todoExist(s.db, updateId) {
 		http.Error(w, "update todo is not exist!", http.StatusBadRequest)
 		return
 	}
@@ -124,28 +120,46 @@ func (s *Server) putHandler(w http.ResponseWriter, r *http.Request) {
 
 	_, err = s.db.Exec(context.Background(), "UPDATE todozz SET content = $1 WHERE id = $2", updateContent, updateId)
 	if err != nil {
-		assertInternalErr(w, err)
+		s.assertInternalErr(w, err)
 		return
 	}
 
-	fmt.Fprintf(w, "Successfully update id: %d!!", updateId)
+	fmt.Fprint(w, "Update successfully")
 }
 
 func (s *Server) deleteHandler(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Hello from delete"))
+	deleteId, _ := strconv.Atoi(r.PathValue("id"))
+
+	if deleteId <= 0 {
+		http.Error(w, "invalid id!", http.StatusBadRequest)
+		return
+	}
+
+	if !s.todoExist(s.db, deleteId) {
+		http.Error(w, "todo is not exist!", http.StatusBadRequest)
+		return
+	}
+
+	_, err := s.db.Exec(context.Background(), "DELETE FROM todozz WHERE id = $1", deleteId)
+	if err != nil {
+		s.assertInternalErr(w, err)
+		return
+	}
+
+	fmt.Fprint(w, "Delete successfully")
 }
 
-func assertInternalErr(w http.ResponseWriter, err error) {
+func (s *Server) assertInternalErr(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), http.StatusInternalServerError)
 	log.Println(err)
 }
 
-func assertBadRequest(w http.ResponseWriter, err error) {
+func (s *Server) assertBadRequest(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), http.StatusBadRequest)
 	log.Println(err)
 }
 
-func todoExist(db *pgx.Conn, id int) bool {
+func (s *Server) todoExist(db *pgx.Conn, id int) bool {
 	err := db.QueryRow(context.Background(), "SELECT * FROM todozz WHERE id=$1", id).Scan(&id)
 	return err != pgx.ErrNoRows
 }
