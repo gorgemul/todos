@@ -1,18 +1,20 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 
+	"github.com/gorgemul/todos/pkg/db"
 	"github.com/gorgemul/todos/types"
-	"github.com/jackc/pgx/v5"
 )
 
-const InvalidContentErrMsg = "Invalid content!"
+const (
+	InvalidContentErrMsg = "Invalid content!"
+	InvalidIdErrMsg      = "Invalid id!"
+)
 
 type TodoStore interface {
 	GetTodos() (types.Todos, error)
@@ -34,7 +36,7 @@ func New(store TodoStore) *Server {
 
 	mux.Handle("GET /", http.HandlerFunc(srv.getHandler))
 	mux.Handle("POST /", http.HandlerFunc(srv.postHandler))
-	// mux.Handle("PUT /update", http.HandlerFunc(srv.putHandler))
+	mux.Handle("PUT /update", http.HandlerFunc(srv.putHandler))
 	// mux.Handle("DELETE /delete/{id}", http.HandlerFunc(srv.deleteHandler))
 
 	srv.Handler = mux
@@ -44,13 +46,12 @@ func New(store TodoStore) *Server {
 func (s *Server) getHandler(w http.ResponseWriter, r *http.Request) {
 	todos, err := s.store.GetTodos()
 	if err != nil {
-		s.logAndResponseWithStatus(w, err, http.StatusInternalServerError)
+		s.logAndResponse(w, err, http.StatusInternalServerError)
 		return
 	}
 
-	err = s.responseInJSON(w, todos)
-	if err != nil {
-		s.logAndResponseWithStatus(w, err, http.StatusInternalServerError)
+	if err := s.responseInJSON(w, todos); err != nil {
+		s.logAndResponse(w, err, http.StatusInternalServerError)
 		return
 	}
 }
@@ -58,20 +59,58 @@ func (s *Server) getHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) postHandler(w http.ResponseWriter, r *http.Request) {
 	content, err := s.extractContentFromRequest(r)
 	if err != nil {
-		s.logAndResponseWithStatus(w, err, http.StatusInternalServerError)
+		s.logAndResponse(w, err, http.StatusInternalServerError)
 		return
 	}
 
-	err = s.store.PostTodo(content)
-	if err != nil {
-		s.logAndResponseWithStatus(w, err, http.StatusInternalServerError)
+	if !s.validContent(content) {
+		s.logAndResponse(w, errors.New(InvalidContentErrMsg), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.PostTodo(content); err != nil {
+		s.logAndResponse(w, err, http.StatusInternalServerError)
 		return
 	}
 
 	s.dbExecuteSuccess(w, "add new todo")
 }
 
-func (s *Server) logAndResponseWithStatus(w http.ResponseWriter, err error, code int) {
+func (s *Server) putHandler(w http.ResponseWriter, r *http.Request) {
+	id, content, err := s.extractIdAndContentFromRequest(r)
+	if err != nil {
+		s.logAndResponse(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	var validParamsErr error
+
+	switch {
+	case !s.validId(id):
+		validParamsErr = errors.New(InvalidIdErrMsg)
+	case !s.validContent(content):
+		validParamsErr = errors.New(InvalidContentErrMsg)
+	}
+
+	if validParamsErr != nil {
+		s.logAndResponse(w, validParamsErr, http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.UpdateTodo(id, content); err != nil {
+		switch err {
+		case db.UpdatedIdNotExistErr:
+			s.logAndResponse(w, err, http.StatusBadRequest)
+		default:
+			s.logAndResponse(w, err, http.StatusInternalServerError)
+		}
+		return
+	}
+
+	s.dbExecuteSuccess(w, "update todo")
+}
+
+func (s *Server) logAndResponse(w http.ResponseWriter, err error, code int) {
 	errMsg := err.Error()
 	log.Println(errMsg)
 	http.Error(w, errMsg, code)
@@ -84,10 +123,17 @@ func (s *Server) extractContentFromRequest(r *http.Request) (string, error) {
 		return "", err
 	}
 
-	if len(newTodo.Content) == 0 {
-		return "", errors.New(InvalidContentErrMsg)
-	}
 	return newTodo.Content, nil
+}
+
+func (s *Server) extractIdAndContentFromRequest(r *http.Request) (int, string, error) {
+	var updateTodo types.UpdateTodo
+	err := json.NewDecoder(r.Body).Decode(&updateTodo)
+	if err != nil {
+		return 0, "", err
+	}
+
+	return updateTodo.Id, updateTodo.Content, nil
 }
 
 func (s *Server) responseInJSON(w http.ResponseWriter, v any) error {
@@ -108,7 +154,10 @@ func (s *Server) dbExecuteSuccess(w http.ResponseWriter, msg string) {
 	fmt.Fprintf(w, "Successfully %s!!!\n", msg)
 }
 
-func (s *Server) todoExist(db *pgx.Conn, id int) bool {
-	err := db.QueryRow(context.Background(), "SELECT * FROM todozz WHERE id=$1", id).Scan(&id)
-	return err != pgx.ErrNoRows
+func (s *Server) validId(id int) bool {
+	return id > 0
+}
+
+func (s *Server) validContent(content string) bool {
+	return len(content) > 0
 }

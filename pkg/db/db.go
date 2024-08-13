@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -9,7 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-var noContext = context.Background()
+var (
+	noContext            = context.Background()
+	UpdatedIdNotExistErr = errors.New("Updated todo id is not exist!")
+)
 
 type DBStore struct {
 	*pgx.Conn
@@ -50,6 +54,15 @@ func (db *DBStore) PostTodo(content string) error {
 }
 
 func (db *DBStore) UpdateTodo(id int, content string) error {
+	result, err := db.Exec(context.Background(), "UPDATE todozz SET content = $1 WHERE id = $2", content, id)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return UpdatedIdNotExistErr
+	}
+
 	return nil
 }
 
