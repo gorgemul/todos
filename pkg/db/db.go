@@ -8,6 +8,7 @@ import (
 
 	"github.com/gorgemul/todos/types"
 	"github.com/jackc/pgx/v5"
+	"github.com/joho/godotenv"
 )
 
 var (
@@ -81,6 +82,10 @@ func (db *DBStore) DeleteTodo(id int) error {
 }
 
 func New() (*DBStore, error) {
+	if err := godotenv.Load(); err != nil {
+		return nil, err
+	}
+
 	conn, err := pgx.Connect(noContext, os.Getenv("TODO_DB"))
 	if err != nil {
 		return nil, fmt.Errorf("problem connecting to db: %v", err)
