@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/gorgemul/todos/pkg/db"
 	"github.com/gorgemul/todos/types"
@@ -37,7 +38,7 @@ func New(store TodoStore) *Server {
 	mux.Handle("GET /", http.HandlerFunc(srv.getHandler))
 	mux.Handle("POST /", http.HandlerFunc(srv.postHandler))
 	mux.Handle("PUT /update", http.HandlerFunc(srv.putHandler))
-	// mux.Handle("DELETE /delete/{id}", http.HandlerFunc(srv.deleteHandler))
+	mux.Handle("DELETE /delete/{id}", http.HandlerFunc(srv.deleteHandler))
 
 	srv.Handler = mux
 	return srv
@@ -57,7 +58,7 @@ func (s *Server) getHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) postHandler(w http.ResponseWriter, r *http.Request) {
-	content, err := s.extractContentFromRequest(r)
+	content, err := s.extractContentFromRequestBody(r)
 	if err != nil {
 		s.logAndResponse(w, err, http.StatusInternalServerError)
 		return
@@ -77,7 +78,7 @@ func (s *Server) postHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) putHandler(w http.ResponseWriter, r *http.Request) {
-	id, content, err := s.extractIdAndContentFromRequest(r)
+	id, content, err := s.extractIdAndContentFromRequestBody(r)
 	if err != nil {
 		s.logAndResponse(w, err, http.StatusInternalServerError)
 		return
@@ -110,13 +111,48 @@ func (s *Server) putHandler(w http.ResponseWriter, r *http.Request) {
 	s.dbExecuteSuccess(w, "update todo")
 }
 
+func (s *Server) deleteHandler(w http.ResponseWriter, r *http.Request) {
+	deleteId, err := s.extractIdFromRequestPath(r)
+	if err != nil {
+		s.logAndResponse(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	if !s.validId(deleteId) {
+		s.logAndResponse(w, errors.New(InvalidIdErrMsg), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.DeleteTodo(deleteId); err != nil {
+		switch err {
+		case db.DeleteIdNotExistErr:
+			s.logAndResponse(w, err, http.StatusBadRequest)
+		default:
+			s.logAndResponse(w, err, http.StatusInternalServerError)
+		}
+		return
+	}
+
+	s.dbExecuteSuccess(w, "delete todo")
+}
+
 func (s *Server) logAndResponse(w http.ResponseWriter, err error, code int) {
 	errMsg := err.Error()
 	log.Println(errMsg)
 	http.Error(w, errMsg, code)
 }
 
-func (s *Server) extractContentFromRequest(r *http.Request) (string, error) {
+func (s *Server) extractIdAndContentFromRequestBody(r *http.Request) (int, string, error) {
+	var updateTodo types.UpdateTodo
+	err := json.NewDecoder(r.Body).Decode(&updateTodo)
+	if err != nil {
+		return 0, "", err
+	}
+
+	return updateTodo.Id, updateTodo.Content, nil
+}
+
+func (s *Server) extractContentFromRequestBody(r *http.Request) (string, error) {
 	var newTodo types.NewTodo
 	err := json.NewDecoder(r.Body).Decode(&newTodo)
 	if err != nil {
@@ -126,14 +162,13 @@ func (s *Server) extractContentFromRequest(r *http.Request) (string, error) {
 	return newTodo.Content, nil
 }
 
-func (s *Server) extractIdAndContentFromRequest(r *http.Request) (int, string, error) {
-	var updateTodo types.UpdateTodo
-	err := json.NewDecoder(r.Body).Decode(&updateTodo)
+func (s *Server) extractIdFromRequestPath(r *http.Request) (int, error) {
+	deleteId, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		return 0, "", err
+		return 0, fmt.Errorf("problem extracting id from request path, %v", err)
 	}
 
-	return updateTodo.Id, updateTodo.Content, nil
+	return deleteId, nil
 }
 
 func (s *Server) responseInJSON(w http.ResponseWriter, v any) error {

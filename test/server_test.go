@@ -3,10 +3,12 @@ package test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +52,16 @@ func (s *stubStore) UpdateTodo(id int, content string) error {
 }
 
 func (s *stubStore) DeleteTodo(id int) error {
+	lenBeforeDelete := len(s.Todos)
+
+	s.Todos = slices.DeleteFunc(s.Todos, func(todo types.Todo) bool {
+		return todo.Id == id
+	})
+
+	if len(s.Todos) == lenBeforeDelete {
+		return db.DeleteIdNotExistErr
+	}
+
 	return nil
 }
 
@@ -91,7 +103,7 @@ func TestGet(t *testing.T) {
 }
 
 func TestPost(t *testing.T) {
-	t.Run("Post happy path", func(t *testing.T) {
+	t.Run("happy path", func(t *testing.T) {
 		newTodo := types.NewTodo{Content: "legit todo content"}
 		srv := server.New(dummyStore)
 
@@ -105,7 +117,6 @@ func TestPost(t *testing.T) {
 		assertTodo(t, dummyStore.newTodo, newTodo)
 		assertStatus(t, response.Code, http.StatusOK)
 	})
-
 	t.Run("Post invalid content", func(t *testing.T) {
 		invalidNewTodo := map[string]string{
 			"contnt": "something",
@@ -139,7 +150,7 @@ func TestPost(t *testing.T) {
 }
 
 func TestPut(t *testing.T) {
-	t.Run("Update happy path", func(t *testing.T) {
+	t.Run("happy path", func(t *testing.T) {
 		store := &stubStore{Todos: dummyTodos}
 		srv := server.New(store)
 		updatedTodo := types.UpdateTodo{Id: 2, Content: "updated content"}
@@ -151,10 +162,9 @@ func TestPut(t *testing.T) {
 
 		srv.ServeHTTP(response, request)
 
-		assertExist(t, dummyTodos, updatedTodo)
+		assertIdAndContentExist(t, dummyTodos, updatedTodo.Id, updatedTodo.Content)
 		assertStatus(t, response.Code, http.StatusOK)
 	})
-
 	t.Run("negative invalid id but valid content", func(t *testing.T) {
 		store := &stubStore{Todos: dummyTodos}
 		srv := server.New(store)
@@ -167,7 +177,7 @@ func TestPut(t *testing.T) {
 
 		srv.ServeHTTP(response, request)
 
-		assertNotExist(t, dummyTodos, updatedTodo)
+		assertIdAndContentNotExist(t, dummyTodos, updatedTodo.Id, updatedTodo.Content)
 		assertErrMsg(t, response.Body.String(), server.InvalidIdErrMsg)
 		assertStatus(t, response.Code, http.StatusBadRequest)
 	})
@@ -204,7 +214,7 @@ func TestPut(t *testing.T) {
 
 		srv.ServeHTTP(response, request)
 
-		assertNotExist(t, dummyTodos, updatedTodo)
+		assertIdAndContentNotExist(t, dummyTodos, updatedTodo.Id, updatedTodo.Content)
 		assertErrMsg(t, response.Body.String(), server.InvalidContentErrMsg)
 		assertStatus(t, response.Code, http.StatusBadRequest)
 	})
@@ -241,7 +251,7 @@ func TestPut(t *testing.T) {
 
 		srv.ServeHTTP(response, request)
 
-		assertNotExist(t, dummyTodos, updatedTodo)
+		assertIdAndContentNotExist(t, dummyTodos, updatedTodo.Id, updatedTodo.Content)
 		assertErrMsg(t, response.Body.String(), server.InvalidIdErrMsg)
 		assertStatus(t, response.Code, http.StatusBadRequest)
 	})
@@ -258,7 +268,7 @@ func TestPut(t *testing.T) {
 
 		srv.ServeHTTP(response, request)
 
-		assertNotExist(t, dummyTodos, updatedTodo)
+		assertIdAndContentNotExist(t, dummyTodos, updatedTodo.Id, updatedTodo.Content)
 		assertErrMsg(t, response.Body.String(), db.UpdatedIdNotExistErr.Error())
 		assertStatus(t, response.Code, http.StatusBadRequest)
 	})
@@ -274,8 +284,53 @@ func TestPut(t *testing.T) {
 
 		srv.ServeHTTP(response, request)
 
-		assertExist(t, dummyTodos, updatedTodo)
+		assertIdAndContentExist(t, dummyTodos, updatedTodo.Id, updatedTodo.Content)
 		assertStatus(t, response.Code, http.StatusOK)
+	})
+}
+
+func TestDelete(t *testing.T) {
+	t.Run("happy path", func(t *testing.T) {
+		store := &stubStore{Todos: dummyTodos}
+		srv := server.New(store)
+		deleteId := 2
+
+		request, err := newDeleteTodoRequest(deleteId)
+		assertNoErr(t, err)
+		response := httptest.NewRecorder()
+
+		srv.ServeHTTP(response, request)
+
+		assertStatus(t, response.Code, http.StatusOK)
+		assertIdNotExist(t, dummyTodos, deleteId)
+	})
+	t.Run("negative invalid delete id", func(t *testing.T) {
+		store := &stubStore{Todos: dummyTodos}
+		srv := server.New(store)
+		deleteId := -5
+
+		request, err := newDeleteTodoRequest(deleteId)
+		assertNoErr(t, err)
+		response := httptest.NewRecorder()
+
+		srv.ServeHTTP(response, request)
+
+		assertStatus(t, response.Code, http.StatusBadRequest)
+		assertErrMsg(t, response.Body.String(), server.InvalidIdErrMsg)
+	})
+	t.Run("delete id valid but not exist at current db", func(t *testing.T) {
+		store := &stubStore{Todos: dummyTodos}
+		srv := server.New(store)
+		deleteId := 3
+
+		request, err := newDeleteTodoRequest(deleteId)
+		assertNoErr(t, err)
+		response := httptest.NewRecorder()
+
+		srv.ServeHTTP(response, request)
+
+		assertStatus(t, response.Code, http.StatusBadRequest)
+		assertErrMsg(t, response.Body.String(), db.DeleteIdNotExistErr.Error())
 	})
 }
 
@@ -322,6 +377,14 @@ func newPutTodoRequest(body io.Reader) (*http.Request, error) {
 	return request, nil
 }
 
+func newDeleteTodoRequest(deleteId int) (*http.Request, error) {
+	request, err := http.NewRequest("DELETE", fmt.Sprintf("/delete/%d", deleteId), nil)
+	if err != nil {
+		return nil, err
+	}
+	return request, nil
+}
+
 func newRequestBody(t *testing.T, v any) *bytes.Buffer {
 	body := new(bytes.Buffer)
 	err := populateRequestBody(body, v)
@@ -359,24 +422,34 @@ func assertNoErr(t testing.TB, err error) {
 	}
 }
 
-func assertExist(t testing.TB, todos types.Todos, updatedTodo types.UpdateTodo) {
+func assertIdAndContentExist(t testing.TB, todos types.Todos, id int, content string) {
 	t.Helper()
 
 	for _, todo := range todos {
-		if todo.Id == updatedTodo.Id && todo.Content == updatedTodo.Content {
+		if todo.Id == id && todo.Content == content {
 			return
 		}
 	}
 
-	t.Fatalf("%v doesn't exist at: %v", updatedTodo, todos)
+	t.Fatalf("{Id: %d, Content: %s} doesn't exist at: %v", id, content, todos)
 }
 
-func assertNotExist(t testing.TB, todos types.Todos, updatdedTodo types.UpdateTodo) {
+func assertIdAndContentNotExist(t testing.TB, todos types.Todos, id int, content string) {
 	t.Helper()
 
 	for _, got := range todos {
-		if got.Id == updatdedTodo.Id && got.Content == updatdedTodo.Content {
-			t.Fatalf("does not expexct %v exist at %v", updatdedTodo, todos)
+		if got.Id == id && got.Content == content {
+			t.Fatalf("{Id: %d, Content: %s} not expect to exist at %v", id, content, todos)
+		}
+	}
+}
+
+func assertIdNotExist(t testing.TB, todos types.Todos, id int) {
+	t.Helper()
+
+	for _, got := range todos {
+		if got.Id == id {
+			t.Fatalf("id: %d not expect to exist at %v", id, todos)
 		}
 	}
 }

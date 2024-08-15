@@ -13,6 +13,7 @@ import (
 var (
 	noContext            = context.Background()
 	UpdatedIdNotExistErr = errors.New("Updated todo id is not exist!")
+	DeleteIdNotExistErr  = errors.New("Deleted todo id is not exist!")
 )
 
 type DBStore struct {
@@ -54,7 +55,7 @@ func (db *DBStore) PostTodo(content string) error {
 }
 
 func (db *DBStore) UpdateTodo(id int, content string) error {
-	result, err := db.Exec(context.Background(), "UPDATE todozz SET content = $1 WHERE id = $2", content, id)
+	result, err := db.Exec(noContext, "UPDATE todozz SET content = $1 WHERE id = $2", content, id)
 	if err != nil {
 		return err
 	}
@@ -67,6 +68,15 @@ func (db *DBStore) UpdateTodo(id int, content string) error {
 }
 
 func (db *DBStore) DeleteTodo(id int) error {
+	result, err := db.Exec(noContext, "DELETE FROM todozz WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return DeleteIdNotExistErr
+	}
+
 	return nil
 }
 
