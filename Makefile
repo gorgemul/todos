@@ -6,8 +6,8 @@ build:
 run: 
 	go run ./cmd/todos/main.go
 
-test:
-	go test ./test/...
+utest:
+	go test ./test/server_unit_test.go
 
 migrate_up:
 	migrate -database ${TODO_DB} -path internal/db/migrations up

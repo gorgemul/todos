@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/gorgemul/todos/types"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
 
@@ -18,7 +18,7 @@ var (
 )
 
 type DBStore struct {
-	*pgx.Conn
+	*pgxpool.Pool
 }
 
 func (db *DBStore) GetTodos() (types.Todos, error) {
@@ -86,10 +86,10 @@ func New() (*DBStore, error) {
 		return nil, err
 	}
 
-	conn, err := pgx.Connect(noContext, os.Getenv("TODO_DB"))
+	pool, err := pgxpool.New(noContext, os.Getenv("TODO_DB"))
 	if err != nil {
 		return nil, fmt.Errorf("problem connecting to db: %v", err)
 	}
 
-	return &DBStore{conn}, nil
+	return &DBStore{pool}, nil
 }

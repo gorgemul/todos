@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 	"net/http"
 
@@ -15,7 +14,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	defer db.Close(context.Background())
+	defer db.Close()
 
 	srv := server.New(db)
 	log.Println("listening port 8080")
