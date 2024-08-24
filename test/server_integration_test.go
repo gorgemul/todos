@@ -70,31 +70,31 @@ func TestHappyPath(t *testing.T) {
 		assertTodos(t, got, expected)
 	})
 
-	expected = add(t, srv, counter, "new 1", expected)
-	expected = add(t, srv, counter, "new 2", expected)
-	expected = add(t, srv, counter, "new 3", expected)
 	t.Run("add three entries", func(t *testing.T) {
+		expected = add(t, srv, counter, "new 1", expected)
+		expected = add(t, srv, counter, "new 2", expected)
+		expected = add(t, srv, counter, "new 3", expected)
 		got := get(t, srv)
 		assertTodos(t, got, expected)
 	})
 
-	expected = updateById(t, srv, 2, "legit content", expected)
 	t.Run("update one entry", func(t *testing.T) {
+		expected = updateById(t, srv, 2, "legit content", expected)
 		got := get(t, srv)
 		assertTodos(t, got, expected)
 	})
 
-	expected = deleteById(t, srv, 2, expected)
 	t.Run("Delete one entry", func(t *testing.T) {
+		expected = deleteById(t, srv, 2, expected)
 		got := get(t, srv)
 		assertTodos(t, got, expected)
 	})
 
-	expected = add(t, srv, counter, "new 4", expected)
-	expected = add(t, srv, counter, "new 5", expected)
-	expected = add(t, srv, counter, "new 6", expected)
-	expected = add(t, srv, counter, "new 7", expected)
 	t.Run("After delete add several entries to make sure id is searial incremantal form", func(t *testing.T) {
+		expected = add(t, srv, counter, "new 4", expected)
+		expected = add(t, srv, counter, "new 5", expected)
+		expected = add(t, srv, counter, "new 6", expected)
+		expected = add(t, srv, counter, "new 7", expected)
 		got := get(t, srv)
 		assertTodos(t, got, expected)
 	})
@@ -111,60 +111,52 @@ func TestErrorPath(t *testing.T) {
 	expected := types.Todos{}
 	counter := &idCounter{current: 1}
 
-	expected = add(t, srv, counter, "", expected)
-
 	t.Run("add empty content to db", func(t *testing.T) {
+		expected = add(t, srv, counter, "", expected)
 		got := get(t, srv)
 		assertTodos(t, got, expected)
 	})
-
-	addMistypeContent(t, srv, "something")
 
 	t.Run("add mistype content to db", func(t *testing.T) {
+		addMistypeContent(t, srv, "something")
 		got := get(t, srv)
 		assertTodos(t, got, expected)
 	})
-
-	expected = updateById(t, srv, -1, "something", expected)
-	expected = updateById(t, srv, 1, "something", expected)
 
 	t.Run("update negative id and invalid id", func(t *testing.T) {
+		expected = updateById(t, srv, -1, "something", expected)
+		expected = updateById(t, srv, 1, "something", expected)
 		got := get(t, srv)
 		assertTodos(t, got, expected)
 	})
-
-	expected = add(t, srv, counter, "legit content", expected)
 
 	t.Run("add one entry to db", func(t *testing.T) {
+		expected = add(t, srv, counter, "legit content", expected)
 		got := get(t, srv)
 		assertTodos(t, got, expected)
 	})
-
-	updateMistypeId(t, srv, 1, "something")
 
 	t.Run("update mistype id from db", func(t *testing.T) {
+		updateMistypeId(t, srv, 1, "something")
 		got := get(t, srv)
 		assertTodos(t, got, expected)
 	})
-
-	updateMistypeContent(t, srv, 1, "something")
 
 	t.Run("update mistype content from db", func(t *testing.T) {
+		updateMistypeContent(t, srv, 1, "something")
 		got := get(t, srv)
 		assertTodos(t, got, expected)
 	})
-
-	updateMistypeIdAndContent(t, srv, 1, "something")
 
 	t.Run("update mistype id and content from db", func(t *testing.T) {
+		updateMistypeIdAndContent(t, srv, 1, "something")
 		got := get(t, srv)
 		assertTodos(t, got, expected)
 	})
 
-	expected = deleteById(t, srv, -1, expected)
-	expected = deleteById(t, srv, 2, expected)
-
 	t.Run("delete negative id and invalid id", func(t *testing.T) {
+		expected = deleteById(t, srv, -1, expected)
+		expected = deleteById(t, srv, 2, expected)
 		got := get(t, srv)
 		assertTodos(t, got, expected)
 	})
