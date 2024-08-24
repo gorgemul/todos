@@ -3,11 +3,11 @@ include .env
 build:
 	go build -o ./bin/todo ./cmd/todos/main.go
 
-run: 
+run:
 	go run ./cmd/todos/main.go
 
-utest:
-	go test ./test/server_unit_test.go
+test:
+	go test ./test/...
 
 migrate_up:
 	migrate -database ${TODO_DB} -path internal/db/migrations up

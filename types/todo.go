@@ -15,6 +15,6 @@ type NewTodo struct {
 }
 
 type UpdateTodo struct {
-	Id      int
-	Content string
+	Id      int    `json:"id"`
+	Content string `json:"content"`
 }

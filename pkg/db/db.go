@@ -22,7 +22,7 @@ type DBStore struct {
 }
 
 func (db *DBStore) GetTodos() (types.Todos, error) {
-	rows, err := db.Query(noContext, "SELECT * FROM todozz")
+	rows, err := db.Query(noContext, "SELECT * FROM todozz ORDER BY id ASC")
 
 	if err != nil {
 		return nil, err
